@@ -17,40 +17,38 @@ class ViewController: UIViewController
     let backgroundNode = SKSpriteNode()
     
     let brushPreviewLayer = CAShapeLayer()
-    let brushPreviewPath = UIBezierPath()
-    let brushRadiusMultiplier = CGFloat(100)
-    let brushInnerRadius = CGFloat(2)
+ 
     
     let tau = CGFloat(M_PI * 2)
     let halfPi = CGFloat(M_PI_2)
   
-    let diffuseCompositeFilter = CIFilter(name: "CIColorBlendMode")!
+    let diffuseCompositeFilter = CIFilter(name: "CISourceOverCompositing")!
     let normalCompositeFilter = CIFilter(name: "CIAdditionCompositing")!
     
     let slider = UISlider()
     var hue = CGFloat(0)
     
-    let ciContext = CIContext(EAGLContext: EAGLContext(API: EAGLRenderingAPI.OpenGLES2), options: [kCIContextWorkingColorSpace: NSNull()])
-    let size = CGSize(width: 1024, height: 1024)
+    static let ciContext = CIContext(EAGLContext: EAGLContext(API: EAGLRenderingAPI.OpenGLES2), options: [kCIContextWorkingColorSpace: NSNull()])
+    static let size = CGSize(width: 1024, height: 1024)
     
-    let bristleCount = 15
+    let bristleCount = 20
     var bristleAngles = [CGFloat]()
     
     var origin = CGPointZero
     var touchData = [TouchDatum]()
     
-    typealias TouchDatum = (location: CGPoint, force: CGFloat, azimuth: CGVector)
+    typealias TouchDatum = (location: CGPoint, force: CGFloat, azimuthVector: CGVector, azimuthAngle: CGFloat)
     
     lazy var diffuseImageAccumulator: CIImageAccumulator =
     {
         [unowned self] in
-        return CIImageAccumulator(extent: CGRect(origin: CGPointZero, size: self.size), format: kCIFormatARGB8)
+        return CIImageAccumulator(extent: CGRect(origin: CGPointZero, size: ViewController.size), format: kCIFormatARGB8)
     }()
     
     lazy var normalImageAccumulator: CIImageAccumulator =
     {
         [unowned self] in
-        return CIImageAccumulator(extent: CGRect(origin: CGPointZero, size: self.size), format: kCIFormatARGB8)
+        return CIImageAccumulator(extent: CGRect(origin: CGPointZero, size: ViewController.size), format: kCIFormatARGB8)
     }()
     
     override func viewDidLoad()
@@ -62,10 +60,11 @@ class ViewController: UIViewController
         
         brushPreviewLayer.strokeColor = UIColor.whiteColor().CGColor
         brushPreviewLayer.lineWidth = 1
+        brushPreviewLayer.fillColor = nil
         
         view.addSubview(spriteKitView)
         view.addSubview(slider)
-        view.layer.addSublayer(brushPreviewLayer)
+        spriteKitView.layer.addSublayer(brushPreviewLayer)
         
         view.backgroundColor =  UIColor.blackColor()
         
@@ -114,7 +113,7 @@ class ViewController: UIViewController
 
     
     
-    func pathFromTouches(touchData: [TouchDatum]) -> CGPathRef?
+    static func pathFromTouches(touchData: [TouchDatum], bristleAngles: [CGFloat]) -> CGPathRef?
     {
         guard let firstTouchDatum = touchData.first,
             firstBristleAngle = bristleAngles.first else
@@ -140,19 +139,17 @@ class ViewController: UIViewController
             {
                 let bristleAngle = bristleAngles[i]
                 
-                let x = touchDatum.location.x + sin(bristleAngle) * forceToRadius(touchDatum.force) * touchDatum.azimuth.dy
-                let y = touchDatum.location.y + cos(bristleAngle) * forceToRadius(touchDatum.force) * touchDatum.azimuth.dx
+                let x = touchDatum.location.x + sin(bristleAngle + touchDatum.azimuthAngle) * forceToRadius(touchDatum.force) * touchDatum.azimuthVector.dy
+                let y = touchDatum.location.y + cos(bristleAngle + touchDatum.azimuthAngle) * forceToRadius(touchDatum.force) * touchDatum.azimuthVector.dx
                 
                 bezierPath.addLineToPoint(CGPoint(x: x, y: y))
-                
-                bristleAngles[i] = bristleAngles[i] - 0.4 + (CGFloat(drand48()) * 0.8)
             }
         }
         
         return bezierPath.CGPath
     }
     
-    func textureFromPath(path: CGPathRef, origin: CGPoint, imageAccumulator: CIImageAccumulator, compositeFilter: CIFilter, color: CGColorRef, lineWidth: CGFloat) -> SKTexture
+    static func textureFromPath(path: CGPathRef, origin: CGPoint, imageAccumulator: CIImageAccumulator, compositeFilter: CIFilter, color: CGColorRef, lineWidth: CGFloat) -> SKTexture
     {
         UIGraphicsBeginImageContext(size)
         
@@ -178,7 +175,7 @@ class ViewController: UIViewController
         
         imageAccumulator.setImage(compositeFilter.valueForKey(kCIOutputImageKey) as! CIImage)
         
-        let filteredImageRef = self.ciContext.createCGImage(imageAccumulator.image(),
+        let filteredImageRef = ciContext.createCGImage(imageAccumulator.image(),
             fromRect: CGRect(origin: CGPointZero, size: size))
         
         
@@ -209,35 +206,40 @@ class ViewController: UIViewController
         touchData.appendContentsOf(coalescedTouces.map({(
             $0.locationInView(spriteKitView),
             $0.force / $0.maximumPossibleForce,
-            $0.azimuthUnitVectorInView(spriteKitView)
+            $0.azimuthUnitVectorInView(spriteKitView),
+            $0.azimuthAngleInView(spriteKitView)
             )}))
+
+        for var i = 0; i < bristleAngles.count; i++
+        {
+            bristleAngles[i] = bristleAngles[i] - 0.02 + CGFloat(drand48() * 0.04)
+        }
         
-        let normalisedAlititudeAngle =  (halfPi - touch.altitudeAngle) / halfPi
-//        let dx = touch.azimuthUnitVectorInView(view).dx * 40 * normalisedAlititudeAngle
-//        let dy = touch.azimuthUnitVectorInView(view).dy * 40 * normalisedAlititudeAngle
-        
-        // drawBrushPreview(touch.locationInView(view), force: touch.force / touch.maximumPossibleForce, dx: dx, dy: dy)
-       
- 
+        if let path = ViewController.pathFromTouches(touchData, bristleAngles: bristleAngles)
+        {
+            brushPreviewLayer.path = path
+        }
     }
     
     var lastTouchPoint = CGPointZero
     
     override func touchesEnded(touches: Set<UITouch>, withEvent event: UIEvent?)
     {
-        guard let path = pathFromTouches(touchData) else
+        brushPreviewLayer.path = nil
+        
+        guard let path = ViewController.pathFromTouches(touchData, bristleAngles: bristleAngles) else
         {
             return
         }
         
-        let texture = textureFromPath(path,
+        let texture = ViewController.textureFromPath(path,
             origin: origin,
             imageAccumulator: diffuseImageAccumulator,
             compositeFilter: diffuseCompositeFilter,
             color: diffuseColor.colorWithAlphaComponent(0.25).CGColor,
             lineWidth: 3)
         
-        let normalMap = textureFromPath(path,
+        let normalMap = ViewController.textureFromPath(path,
             origin: origin,
             imageAccumulator: normalImageAccumulator,
             compositeFilter: normalCompositeFilter,
@@ -251,11 +253,11 @@ class ViewController: UIViewController
     {
         
         
-        spriteKitView.frame = CGRect(origin: CGPoint(x: (view.frame.width - 1024) / 2, y: 0), size: size)
+        spriteKitView.frame = CGRect(origin: CGPoint(x: (view.frame.width - 1024) / 2, y: 0), size: ViewController.size)
         
-        spriteKitScene.size = size
+        spriteKitScene.size = ViewController.size
         
-        backgroundNode.size = size
+        backgroundNode.size = ViewController.size
         
         backgroundNode.position = CGPoint(x: spriteKitView.frame.width / 2, y: spriteKitView.frame.height / 2)
         
