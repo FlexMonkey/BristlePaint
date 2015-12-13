@@ -43,6 +43,21 @@ class ViewController: UIViewController
         return UIColor(hue: hue, saturation: 1, brightness: 1, alpha: 1)
     }
     
+    lazy var clearButton: UIButton =
+    {
+        let button = UIButton()
+        
+        button.contentEdgeInsets = UIEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
+        button.setTitleColor(UIColor.blueColor(), forState: UIControlState.Normal)
+        button.layer.borderColor = UIColor.blueColor().CGColor
+        button.layer.cornerRadius = 4
+        button.layer.borderWidth = 1
+        
+        button.setTitle("Clear", forState: UIControlState.Normal)
+        
+        return button
+    }()
+    
     lazy var bristleAngles: [CGFloat] =
     {
         [unowned self] in
@@ -78,12 +93,16 @@ class ViewController: UIViewController
         slider.maximumValue = 1
         slider.addTarget(self, action: "sliderChangeHandler", forControlEvents: .ValueChanged)
         
+        clearButton.addTarget(self, action: "clearButtonHandler", forControlEvents: .TouchDown)
+        
         brushPreviewLayer.strokeColor = UIColor.whiteColor().CGColor
         brushPreviewLayer.lineWidth = 1
         brushPreviewLayer.fillColor = nil
         
         view.addSubview(spriteKitView)
         view.addSubview(slider)
+        view.addSubview(clearButton)
+        
         spriteKitView.layer.addSublayer(brushPreviewLayer)
         
         view.backgroundColor =  UIColor.blackColor()
@@ -97,7 +116,7 @@ class ViewController: UIViewController
     {
         spriteKitView.presentScene(spriteKitScene)
         
-        for position in [[0,1024], [1024, 1024]]
+        for position in [[0,1024], [1024, 0]]
         {
             let light = SKLightNode()
             
@@ -113,6 +132,15 @@ class ViewController: UIViewController
     }
     
     // MARK: User gesture handlers
+    
+    func clearButtonHandler()
+    {
+        diffuseImageAccumulator.setImage(CIImage())
+        normalImageAccumulator.setImage(CIImage())
+        
+        backgroundNode.texture = nil
+        backgroundNode.normalTexture = nil
+    }
     
     func sliderChangeHandler()
     {
@@ -260,24 +288,24 @@ class ViewController: UIViewController
         
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0))
         {
-            let diffuseMape = ViewController.textureFromPath(pendingPath.path,
+            let diffuseMap = ViewController.textureFromPath(pendingPath.path,
                 origin: pendingPath.origin,
                 imageAccumulator: self.diffuseImageAccumulator,
                 compositeFilter: self.diffuseCompositeFilter,
-                color: pendingPath.color.colorWithAlphaComponent(1).CGColor,
+                color: pendingPath.color.CGColor,
                 lineWidth: 2)
             
             let normalMap = ViewController.textureFromPath(pendingPath.path,
                 origin: pendingPath.origin,
                 imageAccumulator: self.normalImageAccumulator,
                 compositeFilter: self.normalCompositeFilter,
-                color: UIColor(white: 1, alpha: 0.1).CGColor, lineWidth: 2).textureByGeneratingNormalMapWithSmoothness(0.5, contrast: 3)
+                color: UIColor(white: 1, alpha: 0.1).CGColor, lineWidth: 2).textureByGeneratingNormalMapWithSmoothness(0.75, contrast: 3)
             
             dispatch_async(dispatch_get_main_queue())
             {
                 pendingPath.shapeLayer.removeFromSuperlayer()
                 
-                self.backgroundNode.texture = diffuseMape
+                self.backgroundNode.texture = diffuseMap
                 self.backgroundNode.normalTexture = normalMap
                 
                 self.drawPendingPath()
@@ -300,11 +328,15 @@ class ViewController: UIViewController
         
         backgroundNode.size = ViewController.size
         
-        backgroundNode.position = CGPoint(x: spriteKitView.frame.width / 2, y: spriteKitView.frame.height / 2)
+        backgroundNode.position = CGPoint(x: spriteKitView.frame.width / 2,
+            y: spriteKitView.frame.height / 2)
         
         slider.frame = CGRect(x: 0,
             y: view.frame.height - slider.intrinsicContentSize().height - 20,
             width: view.frame.width,
             height: slider.intrinsicContentSize().height).insetBy(dx: 20, dy: 0)
+        
+        clearButton.frame = CGRect(origin: CGPointZero,
+            size: clearButton.intrinsicContentSize())
     }
 }
