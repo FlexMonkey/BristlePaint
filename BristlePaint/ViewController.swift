@@ -26,7 +26,6 @@ class ViewController: UIViewController
   
     let diffuseCompositeFilter = CIFilter(name: "CIColorBlendMode")!
     let normalCompositeFilter = CIFilter(name: "CIAdditionCompositing")!
-    let blur = CIFilter(name: "CIDiscBlur", withInputParameters: [kCIInputRadiusKey : 2])
     
     let slider = UISlider()
     var hue = CGFloat(0)
@@ -34,11 +33,13 @@ class ViewController: UIViewController
     let ciContext = CIContext(EAGLContext: EAGLContext(API: EAGLRenderingAPI.OpenGLES2), options: [kCIContextWorkingColorSpace: NSNull()])
     let size = CGSize(width: 1024, height: 1024)
     
-    let bristleCount = 10
+    let bristleCount = 15
     var bristleAngles = [CGFloat]()
     
     var origin = CGPointZero
-    var touchData = [(location: CGPoint, force: CGFloat)]()
+    var touchData = [TouchDatum]()
+    
+    typealias TouchDatum = (location: CGPoint, force: CGFloat, azimuth: CGVector)
     
     lazy var diffuseImageAccumulator: CIImageAccumulator =
     {
@@ -111,9 +112,9 @@ class ViewController: UIViewController
         return UIColor(hue: hue, saturation: 1, brightness: 1, alpha: 1)
     }
 
-
     
-    func pathFromTouches(touchData: [(location: CGPoint, force: CGFloat)]) -> CGPathRef?
+    
+    func pathFromTouches(touchData: [TouchDatum]) -> CGPathRef?
     {
         guard let firstTouchDatum = touchData.first,
             firstBristleAngle = bristleAngles.first else
@@ -123,7 +124,7 @@ class ViewController: UIViewController
         
         func forceToRadius(force: CGFloat) -> CGFloat
         {
-            return 5 + force * 50
+            return 10 + force * 100
         }
         
         let bezierPath = UIBezierPath()
@@ -139,8 +140,8 @@ class ViewController: UIViewController
             {
                 let bristleAngle = bristleAngles[i]
                 
-                let x = touchDatum.location.x + sin(bristleAngle) * forceToRadius(touchDatum.force)
-                let y = touchDatum.location.y + cos(bristleAngle) * forceToRadius(touchDatum.force)
+                let x = touchDatum.location.x + sin(bristleAngle) * forceToRadius(touchDatum.force) * touchDatum.azimuth.dy
+                let y = touchDatum.location.y + cos(bristleAngle) * forceToRadius(touchDatum.force) * touchDatum.azimuth.dx
                 
                 bezierPath.addLineToPoint(CGPoint(x: x, y: y))
                 
@@ -151,7 +152,7 @@ class ViewController: UIViewController
         return bezierPath.CGPath
     }
     
-    func textureFromPath(path: CGPathRef, origin: CGPoint, imageAccumulator: CIImageAccumulator, compositeFilter: CIFilter, color: CGColorRef, lineWidth: CGFloat, useBlur:Bool = false) -> SKTexture
+    func textureFromPath(path: CGPathRef, origin: CGPoint, imageAccumulator: CIImageAccumulator, compositeFilter: CIFilter, color: CGColorRef, lineWidth: CGFloat) -> SKTexture
     {
         UIGraphicsBeginImageContext(size)
         
@@ -177,20 +178,7 @@ class ViewController: UIViewController
         
         imageAccumulator.setImage(compositeFilter.valueForKey(kCIOutputImageKey) as! CIImage)
         
-        let finalImage: CIImage
-        
-        if useBlur
-        {
-            blur?.setValue(imageAccumulator.image(), forKey: kCIInputImageKey)
-            
-            finalImage = blur?.valueForKey(kCIOutputImageKey) as! CIImage
-        }
-        else
-        {
-            finalImage = imageAccumulator.image()
-        }
-        
-        let filteredImageRef = self.ciContext.createCGImage(finalImage,
+        let filteredImageRef = self.ciContext.createCGImage(imageAccumulator.image(),
             fromRect: CGRect(origin: CGPointZero, size: size))
         
         
@@ -205,7 +193,7 @@ class ViewController: UIViewController
         }
         
         origin = touch.locationInView(spriteKitView)
-        touchData = [(location: CGPoint, force: CGFloat)]()
+        touchData = [TouchDatum]()
     }
     
     override func touchesMoved(touches: Set<UITouch>, withEvent event: UIEvent?)
@@ -218,7 +206,11 @@ class ViewController: UIViewController
             return
         }
         
-        touchData.appendContentsOf(coalescedTouces.map({ ($0.locationInView(spriteKitView), $0.force / $0.maximumPossibleForce) }))
+        touchData.appendContentsOf(coalescedTouces.map({(
+            $0.locationInView(spriteKitView),
+            $0.force / $0.maximumPossibleForce,
+            $0.azimuthUnitVectorInView(spriteKitView)
+            )}))
         
         let normalisedAlititudeAngle =  (halfPi - touch.altitudeAngle) / halfPi
 //        let dx = touch.azimuthUnitVectorInView(view).dx * 40 * normalisedAlititudeAngle
@@ -243,7 +235,7 @@ class ViewController: UIViewController
             imageAccumulator: diffuseImageAccumulator,
             compositeFilter: diffuseCompositeFilter,
             color: diffuseColor.colorWithAlphaComponent(0.25).CGColor,
-            lineWidth: 3, useBlur: true)
+            lineWidth: 3)
         
         let normalMap = textureFromPath(path,
             origin: origin,
