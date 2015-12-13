@@ -288,6 +288,7 @@
 				3EE17B3C1C1A105E00189FFB /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};

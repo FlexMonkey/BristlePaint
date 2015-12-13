@@ -12,6 +12,9 @@ import SpriteKit
 
 class ViewController: UIViewController
 {
+    typealias TouchDatum = (location: CGPoint, force: CGFloat, azimuthVector: CGVector, azimuthAngle: CGFloat)
+    typealias PendingPath = (path: CGPathRef, origin: CGPoint, color: UIColor, shapeLayer: CAShapeLayer)
+    
     let spriteKitView = SKView()
     let spriteKitScene = SKScene()
     let backgroundNode = SKSpriteNode()
@@ -36,8 +39,9 @@ class ViewController: UIViewController
     
     var origin = CGPointZero
     var touchData = [TouchDatum]()
+    var pendingPaths = [PendingPath]()
     
-    typealias TouchDatum = (location: CGPoint, force: CGFloat, azimuthVector: CGVector, azimuthAngle: CGFloat)
+  
     
     lazy var diffuseImageAccumulator: CIImageAccumulator =
     {
@@ -81,7 +85,7 @@ class ViewController: UIViewController
         
         spriteKitView.presentScene(spriteKitScene)
         
-        for position in [[0,1024], [1024,512]]
+        for position in [[0,1024], [1024, 1024]]
         {
             let light = SKLightNode()
             
@@ -210,19 +214,12 @@ class ViewController: UIViewController
             $0.azimuthAngleInView(spriteKitView)
             )}))
 
-        for var i = 0; i < bristleAngles.count; i++
-        {
-            bristleAngles[i] = bristleAngles[i] - 0.02 + CGFloat(drand48() * 0.04)
-        }
-        
         if let path = ViewController.pathFromTouches(touchData, bristleAngles: bristleAngles)
         {
             brushPreviewLayer.path = path
         }
     }
-    
-    var lastTouchPoint = CGPointZero
-    
+  
     override func touchesEnded(touches: Set<UITouch>, withEvent event: UIEvent?)
     {
         brushPreviewLayer.path = nil
@@ -232,27 +229,60 @@ class ViewController: UIViewController
             return
         }
         
-        let texture = ViewController.textureFromPath(path,
-            origin: origin,
-            imageAccumulator: diffuseImageAccumulator,
-            compositeFilter: diffuseCompositeFilter,
-            color: diffuseColor.colorWithAlphaComponent(0.25).CGColor,
-            lineWidth: 3)
+        let temporaryLayer = CAShapeLayer()
+        temporaryLayer.fillColor = nil
+        temporaryLayer.strokeColor = diffuseColor.CGColor
+        temporaryLayer.path = path
         
-        let normalMap = ViewController.textureFromPath(path,
-            origin: origin,
-            imageAccumulator: normalImageAccumulator,
-            compositeFilter: normalCompositeFilter,
-            color: UIColor(white: 1, alpha: 0.1).CGColor, lineWidth: 3).textureByGeneratingNormalMapWithSmoothness(2, contrast: 8)
+        spriteKitView.layer.addSublayer(temporaryLayer)
         
-        backgroundNode.texture = texture
-        backgroundNode.normalTexture = normalMap
+        pendingPaths.append((path, origin, diffuseColor, temporaryLayer))
+        drawPendingPath()
+    }
+    
+    func drawPendingPath()
+    {
+        guard pendingPaths.count > 0 else
+        {
+            return
+        }
+        
+        let pendingPath = pendingPaths.removeFirst()
+        
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0))
+        {
+            let texture = ViewController.textureFromPath(pendingPath.path,
+                origin: pendingPath.origin,
+                imageAccumulator: self.diffuseImageAccumulator,
+                compositeFilter: self.diffuseCompositeFilter,
+                color: pendingPath.color.colorWithAlphaComponent(1).CGColor,
+                lineWidth: 2)
+            
+            let normalMap = ViewController.textureFromPath(pendingPath.path,
+                origin: pendingPath.origin,
+                imageAccumulator: self.normalImageAccumulator,
+                compositeFilter: self.normalCompositeFilter,
+                color: UIColor(white: 1, alpha: 0.05).CGColor, lineWidth: 2).textureByGeneratingNormalMapWithSmoothness(1, contrast: 2)
+            
+            dispatch_async(dispatch_get_main_queue())
+            {
+                pendingPath.shapeLayer.removeFromSuperlayer()
+                
+                self.backgroundNode.texture = texture
+                self.backgroundNode.normalTexture = normalMap
+                
+                self.drawPendingPath()
+            }
+        }
+    }
+    
+    override func prefersStatusBarHidden() -> Bool
+    {
+        return true
     }
     
     override func viewDidLayoutSubviews()
     {
-        
-        
         spriteKitView.frame = CGRect(origin: CGPoint(x: (view.frame.width - 1024) / 2, y: 0), size: ViewController.size)
         
         spriteKitScene.size = ViewController.size
