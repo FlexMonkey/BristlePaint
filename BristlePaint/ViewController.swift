@@ -18,7 +18,6 @@ class ViewController: UIViewController
     
     let brushPreviewLayer = CAShapeLayer()
     let brushPreviewPath = UIBezierPath()
-    let bristleCount = 1
     let brushRadiusMultiplier = CGFloat(100)
     let brushInnerRadius = CGFloat(2)
     
@@ -35,6 +34,12 @@ class ViewController: UIViewController
     let ciContext = CIContext(EAGLContext: EAGLContext(API: EAGLRenderingAPI.OpenGLES2), options: [kCIContextWorkingColorSpace: NSNull()])
     let size = CGSize(width: 1024, height: 1024)
     
+    let bristleCount = 10
+    var bristleAngles = [CGFloat]()
+    
+    var origin = CGPointZero
+    var touchData = [(location: CGPoint, force: CGFloat)]()
+    
     lazy var diffuseImageAccumulator: CIImageAccumulator =
     {
         [unowned self] in
@@ -45,7 +50,7 @@ class ViewController: UIViewController
     {
         [unowned self] in
         return CIImageAccumulator(extent: CGRect(origin: CGPointZero, size: self.size), format: kCIFormatARGB8)
-        }()
+    }()
     
     override func viewDidLoad()
     {
@@ -64,6 +69,13 @@ class ViewController: UIViewController
         view.backgroundColor =  UIColor.blackColor()
         
         sliderChangeHandler()
+        
+        // ---
+        
+        for _ in 0 ... bristleCount
+        {
+            bristleAngles.append(CGFloat(drand48()) * tau)
+        }
         
         // ---
         
@@ -99,7 +111,47 @@ class ViewController: UIViewController
         return UIColor(hue: hue, saturation: 1, brightness: 1, alpha: 1)
     }
 
-    func textureFromTouches(touches: [UITouch], origin: CGPoint, imageAccumulator: CIImageAccumulator, compositeFilter: CIFilter, color: CGColorRef, lineWidth: CGFloat, useBlur:Bool = false) -> SKTexture
+
+    
+    func pathFromTouches(touchData: [(location: CGPoint, force: CGFloat)]) -> CGPathRef?
+    {
+        guard let firstTouchDatum = touchData.first,
+            firstBristleAngle = bristleAngles.first else
+        {
+            return nil
+        }
+        
+        func forceToRadius(force: CGFloat) -> CGFloat
+        {
+            return 5 + force * 50
+        }
+        
+        let bezierPath = UIBezierPath()
+        
+        for var i = 0; i < bristleAngles.count; i++
+        {
+            let x = firstTouchDatum.location.x + sin(firstBristleAngle) * forceToRadius(firstTouchDatum.force)
+            let y = firstTouchDatum.location.y + cos(firstBristleAngle) * forceToRadius(firstTouchDatum.force)
+            
+            bezierPath.moveToPoint(CGPoint(x: x, y: y))
+            
+            for touchDatum in touchData
+            {
+                let bristleAngle = bristleAngles[i]
+                
+                let x = touchDatum.location.x + sin(bristleAngle) * forceToRadius(touchDatum.force)
+                let y = touchDatum.location.y + cos(bristleAngle) * forceToRadius(touchDatum.force)
+                
+                bezierPath.addLineToPoint(CGPoint(x: x, y: y))
+                
+                bristleAngles[i] = bristleAngles[i] - 0.4 + (CGFloat(drand48()) * 0.8)
+            }
+        }
+        
+        return bezierPath.CGPath
+    }
+    
+    func textureFromPath(path: CGPathRef, origin: CGPoint, imageAccumulator: CIImageAccumulator, compositeFilter: CIFilter, color: CGColorRef, lineWidth: CGFloat, useBlur:Bool = false) -> SKTexture
     {
         UIGraphicsBeginImageContext(size)
         
@@ -110,19 +162,7 @@ class ViewController: UIViewController
         
         CGContextSetStrokeColorWithColor(cgContext, color)
 
-        CGContextSetLineJoin(cgContext, CGLineJoin.Round)
-        CGContextSetFlatness(cgContext, 0)
-        
-        CGContextMoveToPoint(cgContext,
-            origin.x,
-            origin.y)
-        
-        for touch in touches
-        {            
-            CGContextAddLineToPoint(cgContext,
-                touch.locationInView(spriteKitView).x,
-                touch.locationInView(spriteKitView).y)
-        }
+        CGContextAddPath(cgContext, path)
         
         CGContextStrokePath(cgContext)
         
@@ -156,10 +196,7 @@ class ViewController: UIViewController
         
         return SKTexture(CGImage: filteredImageRef)
     }
-    
-    var origin = CGPointZero
-    var xxxx = [UITouch]()
-    
+
     override func touchesBegan(touches: Set<UITouch>, withEvent event: UIEvent?)
     {
         guard let touch = touches.first else
@@ -168,7 +205,7 @@ class ViewController: UIViewController
         }
         
         origin = touch.locationInView(spriteKitView)
-        xxxx = [UITouch]()
+        touchData = [(location: CGPoint, force: CGFloat)]()
     }
     
     override func touchesMoved(touches: Set<UITouch>, withEvent event: UIEvent?)
@@ -181,7 +218,7 @@ class ViewController: UIViewController
             return
         }
         
-        xxxx.appendContentsOf(coalescedTouces)
+        touchData.appendContentsOf(coalescedTouces.map({ ($0.locationInView(spriteKitView), $0.force / $0.maximumPossibleForce) }))
         
         let normalisedAlititudeAngle =  (halfPi - touch.altitudeAngle) / halfPi
 //        let dx = touch.azimuthUnitVectorInView(view).dx * 40 * normalisedAlititudeAngle
@@ -196,18 +233,23 @@ class ViewController: UIViewController
     
     override func touchesEnded(touches: Set<UITouch>, withEvent event: UIEvent?)
     {
-        let texture = textureFromTouches(xxxx,
+        guard let path = pathFromTouches(touchData) else
+        {
+            return
+        }
+        
+        let texture = textureFromPath(path,
             origin: origin,
             imageAccumulator: diffuseImageAccumulator,
             compositeFilter: diffuseCompositeFilter,
             color: diffuseColor.colorWithAlphaComponent(0.25).CGColor,
-            lineWidth: 6, useBlur: true)
+            lineWidth: 3, useBlur: true)
         
-        let normalMap = textureFromTouches(xxxx,
+        let normalMap = textureFromPath(path,
             origin: origin,
             imageAccumulator: normalImageAccumulator,
             compositeFilter: normalCompositeFilter,
-            color: UIColor(white: 1, alpha: 0.1).CGColor, lineWidth: 4).textureByGeneratingNormalMapWithSmoothness(2, contrast: 8)
+            color: UIColor(white: 1, alpha: 0.1).CGColor, lineWidth: 3).textureByGeneratingNormalMapWithSmoothness(2, contrast: 8)
         
         backgroundNode.texture = texture
         backgroundNode.normalTexture = normalMap
